@@ -2,552 +2,301 @@
 
 /*
     URL опубликованного Google Apps Script.
-    Если после нового развёртывания URL изменится —
-    замените его здесь.
+    Если после нового развёртывания URL изменится — замените его здесь.
 */
-
 const API_URL =
     "https://script.google.com/macros/s/AKfycbzHgnnwLnRL0P8HFdn0EB6l4JF3v40973lfMePXMQO6gAypTHfg304sT2tNhEP8k3IA/exec";
 
-
 let password = localStorage.getItem("kmb_pw") || "";
-
 let people = [];
-
 let currentFilter = "urgent";
+let unitFilter = "all";
+let sortMode = "least"; // least = меньше времени первыми, most = больше времени первыми
 
+const $ = id => document.getElementById(id);
 
 /* =========================
    API
 ========================= */
-
 async function api(action, extra = {}) {
     const response = await fetch(API_URL, {
         method: "POST",
-        headers: {
-            "Content-Type": "text/plain;charset=utf-8"
-        },
-        body: JSON.stringify({
-            password,
-            action,
-            ...extra
-        })
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ password, action, ...extra })
     });
 
     const raw = await response.text();
 
     if (!response.ok) {
-        console.error(
-            `Ошибка HTTP ${response.status} при выполнении "${action}":`,
-            raw
-        );
-
-        throw new Error(
-            `Ошибка сервера: HTTP ${response.status}.`
-        );
+        console.error(`Ошибка HTTP ${response.status} при выполнении "${action}":`, raw);
+        throw new Error(`Ошибка сервера: HTTP ${response.status}.`);
     }
 
     let data;
-
     try {
         data = JSON.parse(raw);
     } catch (error) {
-        console.error(
-            `Google Apps Script вернул некорректный ответ для "${action}":`,
-            raw
-        );
-
-        throw new Error(
-            "Сервер вернул некорректный ответ."
-        );
+        console.error(`Google Apps Script вернул некорректный ответ для "${action}":`, raw);
+        throw new Error("Сервер вернул некорректный ответ.");
     }
 
     if (!data.ok) {
-        throw new Error(
-            data.error || "Неизвестная ошибка сервера."
-        );
+        throw new Error(data.error || "Неизвестная ошибка сервера.");
     }
-
     return data;
 }
-
 
 /* =========================
    DATE
 ========================= */
-
 function parseDate(value) {
+    if (!value) return null;
+    if (value instanceof Date) return value;
 
-    if (!value) {
-        return null;
-    }
-
-    if (value instanceof Date) {
-        return value;
-    }
-
-    const str = String(value).trim();
-
-    const match = str.match(
+    const match = String(value).trim().match(
         /^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/
     );
-
-    if (!match) {
-        return null;
-    }
-
-    const day = Number(match[1]);
-    const month = Number(match[2]) - 1;
-    const year = Number(match[3]);
-
-    const hour = Number(match[4] || 0);
-    const minute = Number(match[5] || 0);
+    if (!match) return null;
 
     return new Date(
-        year,
-        month,
-        day,
-        hour,
-        minute,
-        0
+        Number(match[3]), Number(match[2]) - 1, Number(match[1]),
+        Number(match[4] || 0), Number(match[5] || 0), 0
     );
 }
 
+const pad = n => String(n).padStart(2, "0");
 
 function formatDate(value) {
-
-    const date = parseDate(value);
-
-    if (!date) {
-        return "—";
-    }
-
-    const day = String(date.getDate()).padStart(2, "0");
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const year = date.getFullYear();
-
-    return `${day}.${month}.${year}`;
+    const d = parseDate(value);
+    if (!d) return "—";
+    return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
 }
-
 
 function formatDateTime(value) {
-
-    const date = parseDate(value);
-
-    if (!date) {
-        return "—";
-    }
-
-    const day = String(date.getDate()).padStart(2, "0");
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const year = date.getFullYear();
-
-    const hour = String(date.getHours()).padStart(2, "0");
-    const minute = String(date.getMinutes()).padStart(2, "0");
-
-    return `${day}.${month}.${year} ${hour}:${minute}`;
+    const d = parseDate(value);
+    if (!d) return "—";
+    return `${formatDate(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// "dd.MM.yyyy HH:mm" -> "yyyy-MM-ddTHH:mm" (для datetime-local)
+function toInputValue(value) {
+    const d = parseDate(value);
+    if (!d) return "";
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// "yyyy-MM-ddTHH:mm" -> "dd.MM.yyyy HH:mm"
+function fromInputValue(value) {
+    const m = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    return m ? `${m[3]}.${m[2]}.${m[1]} ${m[4]}:${m[5]}` : "";
+}
 
 /* =========================
    TIME
 ========================= */
+function deadlineMs(person) {
+    if (Number.isFinite(person.deadlineTs)) return person.deadlineTs;
+    const d = parseDate(person.deadline);
+    return d ? d.getTime() : null;
+}
 
 function levelOf(person) {
+    const ms = deadlineMs(person);
+    if (ms === null) return "ok";
 
-    if (!person.deadline) {
-        return "ok";
-    }
-
-    const deadline = parseDate(person.deadline);
-
-    if (!deadline) {
-        return "ok";
-    }
-
-    const diff = deadline.getTime() - Date.now();
-
-    if (diff <= 0) {
-        return "late";
-    }
-
-    if (diff <= 24 * 60 * 60 * 1000) {
-        return "soon";
-    }
-
+    const diff = ms - Date.now();
+    if (diff <= 0) return "late";
+    if (diff <= 24 * 60 * 60 * 1000) return "soon";
     return "ok";
 }
 
-
 function formatDuration(milliseconds) {
+    if (!Number.isFinite(milliseconds)) return "—";
+    if (milliseconds <= 0) return "СРОК ВЫШЕЛ";
 
-    if (!Number.isFinite(milliseconds)) {
-        return "—";
-    }
+    const totalMinutes = Math.floor(milliseconds / 60000);
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const minutes = totalMinutes % 60;
 
-    if (milliseconds <= 0) {
-        return "СРОК ВЫШЕЛ";
-    }
-
-    const totalMinutes =
-        Math.floor(milliseconds / 60000);
-
-    const days =
-        Math.floor(totalMinutes / 1440);
-
-    const hours =
-        Math.floor(
-            (totalMinutes % 1440) / 60
-        );
-
-    const minutes =
-        totalMinutes % 60;
-
-    if (days > 0) {
-        return `${days} д. ${hours} ч.`;
-    }
-
-    if (hours > 0) {
-        return `${hours} ч. ${minutes} мин.`;
-    }
-
+    if (days > 0) return `${days} д. ${hours} ч.`;
+    if (hours > 0) return `${hours} ч. ${minutes} мин.`;
     return `${minutes} мин.`;
 }
 
-
 function remaining(person) {
-
-    if (!person.deadline) {
-        return "—";
-    }
-
-    const deadline = parseDate(person.deadline);
-
-    if (!deadline) {
-        return "—";
-    }
-
-    return formatDuration(
-        deadline.getTime() - Date.now()
-    );
+    const ms = deadlineMs(person);
+    return ms === null ? "—" : formatDuration(ms - Date.now());
 }
-
 
 /* =========================
    ESCAPE HTML
 ========================= */
-
 function escapeHtml(value) {
-
     return String(value ?? "")
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
+        .replaceAll("'", "&#39;");
 }
-
 
 /* =========================
    STATUS
 ========================= */
+const isKmbStatus = p => p.status === "КМБ" || p.status === "УКМБ";
+const isNoUnitStatus = p => p.status === "Без подразделения";
 
 function statusText(person) {
-
-    if (person.status === "Без подразделения") {
-        return "Без подразделения";
-    }
-
-    if (person.status === "КМБ") {
-        return "КМБ";
-    }
-
-    if (person.status === "В подразделении") {
-        return "В подразделении";
-    }
-
     return person.status || "—";
 }
 
-
 function statusClass(person) {
-
-    if (person.status === "Без подразделения") {
-        return "status--nounit";
-    }
-
-    if (person.status === "КМБ") {
-        return "status--kmb";
-    }
-
+    if (isNoUnitStatus(person)) return "status--nounit";
+    if (person.status === "УКМБ") return "status--ukmb";
+    if (person.status === "КМБ") return "status--kmb";
     return "status--unit";
 }
 
+/* =========================
+   FILTER + SORT
+========================= */
+function sortPeople(list) {
+    const dir = sortMode === "most" ? -1 : 1;
+
+    return [...list].sort((a, b) => {
+        const da = deadlineMs(a);
+        const db = deadlineMs(b);
+        if (da === null && db === null) return 0;
+        if (da === null) return 1;   // без дедлайна всегда в конце
+        if (db === null) return -1;
+        return (da - db) * dir;
+    });
+}
+
+function getFilteredPeople() {
+    let list;
+
+    switch (currentFilter) {
+        case "urgent":
+            list = people.filter(p => {
+                const level = levelOf(p);
+                return level === "late" || level === "soon";
+            });
+            break;
+        case "kmb":
+            list = people.filter(isKmbStatus);
+            break;
+        case "nounit":
+            list = people.filter(isNoUnitStatus);
+            break;
+        case "all":
+            list = [...people];
+            break;
+        default:
+            list = [];
+    }
+
+    if (unitFilter !== "all") {
+        const target = unitFilter.toLowerCase();
+        list = list.filter(p => String(p.unit || "").trim().toLowerCase() === target);
+    }
+
+    return sortPeople(list);
+}
 
 /* =========================
    RENDER
 ========================= */
-
-function getFilteredPeople() {
-
-    switch (currentFilter) {
-
-        case "urgent":
-
-            return people.filter(person => {
-
-                const level = levelOf(person);
-
-                return (
-                    level === "late" ||
-                    level === "soon"
-                );
-            });
-
-
-        case "kmb":
-
-            return people.filter(
-                person =>
-                    person.status === "КМБ"
-            );
-
-
-        case "nounit":
-
-            return people.filter(
-                person =>
-                    person.status === "Без подразделения"
-            );
-
-
-        case "all":
-
-            return [...people];
-
-
-        default:
-
-            return [];
-    }
-}
-
-
 function render() {
-
     updateCounters();
 
-    const body =
-        document.getElementById("peopleBody");
-
-    const empty =
-        document.getElementById("emptyState");
-
-    const list =
-        getFilteredPeople();
+    const body = $("peopleBody");
+    const empty = $("emptyState");
+    const list = getFilteredPeople();
 
     body.innerHTML = "";
 
     if (list.length === 0) {
-
         empty.classList.remove("hidden");
-
         return;
     }
-
     empty.classList.add("hidden");
 
-
     for (const person of list) {
-
-        const tr =
-            document.createElement("tr");
-
-        const level =
-            levelOf(person);
-
+        const tr = document.createElement("tr");
+        const level = levelOf(person);
         const levelClass =
-            level === "late"
-                ? "deadline--late"
-                : level === "soon"
-                    ? "deadline--soon"
-                    : "deadline--ok";
+            level === "late" ? "deadline--late" :
+            level === "soon" ? "deadline--soon" : "deadline--ok";
 
-
-        const composerName =
-            person.composerName || "—";
-
-        const composerStatic =
-            person.composerStatic || "—";
-
+        const noUnitDate = isNoUnitStatus(person)
+            ? formatDateTime(person.noUnitSince || person.statusSince)
+            : "—";
 
         tr.innerHTML = `
-
-            <td>
-                <div class="person-name">
-                    ${escapeHtml(person.name)}
-                </div>
-            </td>
-
-            <td>
-                <span class="static">
-                    ${escapeHtml(person.staticId)}
-                </span>
-            </td>
-
-            <td>
-                ${escapeHtml(person.rank || "—")}
-            </td>
-
-            <td>
-                ${escapeHtml(person.unit || "—")}
-            </td>
-
+            <td><div class="person-name">${escapeHtml(person.name)}</div></td>
+            <td><span class="static">${escapeHtml(person.staticId)}</span></td>
+            <td>${escapeHtml(person.rank || "—")}</td>
+            <td>${escapeHtml(person.unit || "—")}</td>
             <td>
                 <div class="composer">
-                    <div class="composer__name">
-                        ${escapeHtml(composerName)}
-                    </div>
-
-                    <div class="composer__static">
-                        ${escapeHtml(composerStatic)}
-                    </div>
+                    <div class="composer__name">${escapeHtml(person.composerName || "—")}</div>
+                    <div class="composer__static">${escapeHtml(person.composerStatic || "—")}</div>
                 </div>
             </td>
-
+            <td><span class="status ${statusClass(person)}">${escapeHtml(statusText(person))}</span></td>
+            <td>${formatDateTime(person.enlisted)}</td>
+            <td>${noUnitDate}</td>
+            <td><span class="deadline ${levelClass}">${formatDate(person.deadline)}</span></td>
+            <td><span class="deadline ${levelClass}">${escapeHtml(remaining(person))}</span></td>
             <td>
-                <span class="status ${statusClass(person)}">
-                    ${escapeHtml(statusText(person))}
-                </span>
-            </td>
-
-            <td>
-                ${formatDateTime(person.enlisted)}
-            </td>
-
-            <td>
-                <span class="deadline ${levelClass}">
-                    ${formatDateTime(person.deadline)}
-                </span>
-            </td>
-
-            <td>
-                <span class="deadline ${levelClass}">
-                    ${escapeHtml(remaining(person))}
-                </span>
-            </td>
-
-            <td>
-
                 <div class="action-buttons">
-
-                    <button
-                        data-action="edit"
-                        data-static="${escapeHtml(person.staticId)}"
-                    >
-                        Изменить
-                    </button>
-
-                    <button
-                        class="danger"
-                        data-action="remove"
-                        data-static="${escapeHtml(person.staticId)}"
-                    >
-                        Удалить
-                    </button>
-
+                    <button data-action="edit" data-static="${escapeHtml(person.staticId)}">Изменить</button>
+                    <button class="danger" data-action="remove" data-static="${escapeHtml(person.staticId)}">Удалить</button>
                 </div>
-
             </td>
         `;
-
         body.appendChild(tr);
     }
 }
 
-
 /* =========================
    COUNTERS
 ========================= */
-
 function updateCounters() {
-
-    let late = 0;
-    let soon = 0;
-    let ok = 0;
+    let late = 0, soon = 0, ok = 0;
 
     for (const person of people) {
-
         const level = levelOf(person);
-
-        if (level === "late") {
-            late++;
-        } else if (level === "soon") {
-            soon++;
-        } else {
-            ok++;
-        }
+        if (level === "late") late++;
+        else if (level === "soon") soon++;
+        else ok++;
     }
 
+    $("lateCount").textContent = late;
+    $("soonCount").textContent = soon;
+    $("okCount").textContent = ok;
+    $("totalCount").textContent = people.length;
 
-    document.getElementById("lateCount").textContent =
-        late;
-
-    document.getElementById("soonCount").textContent =
-        soon;
-
-    document.getElementById("okCount").textContent =
-        ok;
-
-    document.getElementById("totalCount").textContent =
-        people.length;
-
-
-    document.getElementById("tabUrgentCount").textContent =
-        late + soon;
-
-    document.getElementById("tabKmbCount").textContent =
-        people.filter(
-            p => p.status === "КМБ"
-        ).length;
-
-    document.getElementById("tabNoUnitCount").textContent =
-        people.filter(
-            p => p.status === "Без подразделения"
-        ).length;
-
-    document.getElementById("tabAllCount").textContent =
-        people.length;
+    $("tabUrgentCount").textContent = late + soon;
+    $("tabKmbCount").textContent = people.filter(isKmbStatus).length;
+    $("tabNoUnitCount").textContent = people.filter(isNoUnitStatus).length;
+    $("tabAllCount").textContent = people.length;
 }
-
 
 /* =========================
    LOAD
 ========================= */
-
 async function load() {
     try {
         const data = await api("list");
-
-        people = Array.isArray(data.people)
-            ? data.people
-            : [];
-
+        people = Array.isArray(data.people) ? data.people : [];
         render();
-
         return true;
-
     } catch (error) {
-        console.error(
-            "Не удалось загрузить данные:",
-            error
-        );
-
-        alert(
-            "Не удалось загрузить данные:\n\n" +
-            error.message
-        );
-
+        console.error("Не удалось загрузить данные:", error);
+        alert("Не удалось загрузить данные:\n\n" + error.message);
         return false;
     }
 }
@@ -555,1505 +304,466 @@ async function load() {
 async function silentLoad() {
     try {
         const data = await api("list");
-
-        people = Array.isArray(data.people)
-            ? data.people
-            : [];
-
+        people = Array.isArray(data.people) ? data.people : [];
         render();
-
         return true;
-
     } catch (error) {
-        console.warn(
-            "Фоновое обновление данных не выполнено:",
-            error
-        );
-
+        console.warn("Фоновое обновление данных не выполнено:", error);
         return false;
     }
 }
 
 /* =========================
-   LOGIN
+   LOGIN / LOGOUT
 ========================= */
-
 async function login() {
-
-    const input =
-        document.getElementById("passwordInput");
-
-    const error =
-        document.getElementById("loginError");
-
-    const value =
-        input.value.trim();
+    const input = $("passwordInput");
+    const error = $("loginError");
+    const value = input.value.trim();
 
     if (!value) {
-
-        error.textContent =
-            "Введите пароль.";
-
+        error.textContent = "Введите пароль.";
         return;
     }
 
     password = value;
 
     try {
+        const data = await api("list");
+        people = Array.isArray(data.people) ? data.people : [];
 
-        const data =
-            await api("list");
-
-        people =
-            Array.isArray(data.people)
-                ? data.people
-                : [];
-
-        localStorage.setItem(
-            "kmb_pw",
-            password
-        );
-
-        document
-            .getElementById("loginPanel")
-            .classList.add("hidden");
-
-        document
-            .getElementById("mainPanel")
-            .classList.remove("hidden");
-
+        localStorage.setItem("kmb_pw", password);
+        $("loginPanel").classList.add("hidden");
+        $("mainPanel").classList.remove("hidden");
         error.textContent = "";
-
         render();
-
     } catch (err) {
-
         password = "";
-
-        error.textContent =
-            err.message ||
-            "Неверный пароль.";
+        error.textContent = err.message || "Неверный пароль.";
     }
 }
 
-
-/* =========================
-   LOGOUT
-========================= */
-
 function logout() {
-
     password = "";
-
     localStorage.removeItem("kmb_pw");
-
-    document
-        .getElementById("mainPanel")
-        .classList.add("hidden");
-
-    document
-        .getElementById("loginPanel")
-        .classList.remove("hidden");
-
-    document
-        .getElementById("passwordInput")
-        .value = "";
+    $("mainPanel").classList.add("hidden");
+    $("loginPanel").classList.remove("hidden");
+    $("passwordInput").value = "";
 }
-
 
 /* =========================
    INGEST
 ========================= */
+function personHead(item) {
+    return `
+        <strong>${escapeHtml(item.name || "Неизвестный военнослужащий")}</strong>
+        ${item.staticId ? `<code>${escapeHtml(item.staticId)}</code>` : ""}
+    `;
+}
+
+function ingestGroup(cls, title, items, renderItem) {
+    if (!items.length) return "";
+    return `
+        <div class="ingest-group ingest-group--${cls}">
+            <h3>${title}</h3>
+            <div class="ingest-list">
+                ${items.map(item => `<div class="ingest-item">${renderItem(item)}</div>`).join("")}
+            </div>
+        </div>
+    `;
+}
+
+function changesHtml(changes) {
+    const fields = [["rank", "Звание"], ["unit", "Подразделение"], ["status", "Статус"]];
+    let html = "";
+
+    for (const [key, label] of fields) {
+        const c = changes && changes[key];
+        if (c && c.old !== c.new) {
+            html += `
+                <div>
+                    ${label}:
+                    <span class="old-value">${escapeHtml(c.old || "—")}</span>
+                    →
+                    <strong>${escapeHtml(c.new || "—")}</strong>
+                </div>
+            `;
+        }
+    }
+    return html;
+}
 
 async function ingest() {
-
-    const text =
-        document
-            .getElementById("logInput")
-            .value
-            .trim();
-
-
-    const today =
-        document
-            .getElementById("todayInput")
-            .value;
-
-
-    const result =
-        document
-            .getElementById("ingestResult");
-
+    const text = $("logInput").value.trim();
+    const today = $("todayInput").value;
+    const result = $("ingestResult");
 
     if (!text) {
-
-        result.className =
-            "result error";
-
-        result.textContent =
-            "Вставьте сообщения журнала.";
-
-        result.classList.remove(
-            "hidden"
-        );
-
+        result.className = "result error";
+        result.textContent = "Вставьте сообщения журнала.";
+        result.classList.remove("hidden");
         return;
     }
 
-
-    result.className =
-        "result";
-
-    result.textContent =
-        "Обрабатываем журнал...";
-
-    result.classList.remove(
-        "hidden"
-    );
-
+    result.className = "result";
+    result.textContent = "Обрабатываем журнал...";
+    result.classList.remove("hidden");
 
     try {
+        const data = await api("ingest", { text, today });
 
-        const data =
-            await api(
-                "ingest",
-                {
-                    text,
-                    today
-                }
-            );
-
+        const stat = (n, label) => `<span><strong>${n ?? 0}</strong> ${label}</span>`;
 
         let html = `
-
             <div class="ingest-summary">
-
                 <h3>Обработка завершена</h3>
-
                 <div class="ingest-stats">
-
-                    <span>
-                        <strong>${data.parsed ?? 0}</strong>
-                        найдено событий
-                    </span>
-
-                    <span>
-                        <strong>${data.added ?? 0}</strong>
-                        добавлено
-                    </span>
-
-                    <span>
-                        <strong>${data.changed ?? 0}</strong>
-                        изменено
-                    </span>
-
-                    <span>
-                        <strong>${data.removed ?? 0}</strong>
-                        удалено
-                    </span>
-
-                    <span>
-                        <strong>${data.transferred ?? 0}</strong>
-                        переведено из КМБ
-                    </span>
-
-                    <span>
-                        <strong>${data.duplicates ?? 0}</strong>
-                        дубликатов
-                    </span>
-
-                    <span>
-                        <strong>${data.ignored ?? 0}</strong>
-                        проигнорировано
-                    </span>
-
+                    ${stat(data.parsed, "найдено событий")}
+                    ${stat(data.added, "добавлено")}
+                    ${stat(data.changed, "изменено")}
+                    ${stat(data.removed, "удалено")}
+                    ${stat(data.transferred, "переведено из КМБ")}
+                    ${stat(data.duplicates, "дубликатов")}
+                    ${stat(data.ignored, "проигнорировано")}
                 </div>
-
             </div>
-
         `;
 
+        const details = Array.isArray(data.details) ? data.details : [];
+        const by = list => details.filter(i => list.includes(i.processed));
 
-        const details =
-            Array.isArray(data.details)
-                ? data.details
-                : [];
+        html += ingestGroup("success", "🟢 Добавлены", by(["added"]), item => `
+            ${personHead(item)}
+            <div>Звание: ${escapeHtml(item.rank || "—")}</div>
+            <div>Подразделение: ${escapeHtml(item.unit || "—")}</div>
+        `);
 
+        html += ingestGroup("warning", "🟡 Изменения",
+            by(["changed", "promo_kmb", "promoted_to_junior_sergeant", "moved_to_no_unit", "joined_kmb", "joined_no_unit"]),
+            item => `
+                ${personHead(item)}
+                <div class="ingest-message">${escapeHtml(item.message || "")}</div>
+                ${changesHtml(item.changes)}
+            `);
 
-        /* =================================================
-           ДОБАВЛЕНЫ
-        ================================================= */
+        html += ingestGroup("danger", "🔴 Уволены", by(["fired"]), item => `
+            ${personHead(item)}
+            ${item.reason ? `<div>Причина: ${escapeHtml(item.reason)}</div>` : ""}
+        `);
 
-        const added =
-            details.filter(
-                item =>
-                    item.processed ===
-                    "added"
-            );
+        html += ingestGroup("transfer", "🟠 Переведены из КМБ", by(["transferred_from_kmb"]), item => `
+            ${personHead(item)}
+            <div>${escapeHtml(item.message || "")}</div>
+        `);
 
+        html += ingestGroup("muted", "⚪ Проигнорированы",
+            by(["ignored_other_unit", "ignored_unknown", "ignored_old", "ignored_invalid_transfer", "fire_not_found", "ignore", "ignored"]),
+            item => `
+                ${personHead(item)}
+                <div>${escapeHtml(item.message || "Событие проигнорировано")}</div>
+            `);
 
-        if (added.length) {
+        html += ingestGroup("duplicate", "🟣 Дубликаты", by(["duplicate"]), item => `
+            ${personHead(item)}
+            <div>Это событие уже было обработано ранее.</div>
+        `);
 
-            html += `
+        const bad = Array.isArray(data.bad) ? data.bad : [];
+        html += ingestGroup("danger", "❌ Нераспознанные события", bad.slice(0, 20), item => escapeHtml(item));
 
-                <div class="ingest-group ingest-group--success">
-
-                    <h3>🟢 Добавлены</h3>
-
-                    <div class="ingest-list">
-
-                        ${added.map(item => `
-
-                            <div class="ingest-item">
-
-                                <strong>
-                                    ${escapeHtml(
-                                        item.name
-                                    )}
-                                </strong>
-
-                                <code>
-                                    ${escapeHtml(
-                                        item.staticId
-                                    )}
-                                </code>
-
-                                <div>
-                                    Звание:
-                                    ${escapeHtml(
-                                        item.rank || "—"
-                                    )}
-                                </div>
-
-                                <div>
-                                    Подразделение:
-                                    ${escapeHtml(
-                                        item.unit || "—"
-                                    )}
-                                </div>
-
-                            </div>
-
-                        `).join("")}
-
-                    </div>
-
-                </div>
-
-            `;
+        if (!details.length && !bad.length) {
+            html += `<div class="ingest-empty">Событий для изменения данных не найдено.</div>`;
         }
 
-
-        /* =================================================
-           ИЗМЕНЕНЫ
-        ================================================= */
-
-        const changed =
-            details.filter(
-                item =>
-                    [
-                        "changed",
-                        "promo_kmb",
-                        "promoted_to_junior_sergeant",
-                        "moved_to_no_unit",
-                        "joined_kmb",
-                        "joined_no_unit"
-                    ].includes(
-                        item.processed
-                    )
-            );
-
-
-        if (changed.length) {
-
-            html += `
-
-                <div class="ingest-group ingest-group--warning">
-
-                    <h3>🟡 Изменения</h3>
-
-                    <div class="ingest-list">
-
-                        ${changed.map(item => {
-
-                            const changes =
-                                item.changes || {};
-
-
-                            let changesHtml =
-                                "";
-
-
-                            if (
-                                changes.rank &&
-                                (
-                                    changes.rank.old !==
-                                    changes.rank.new
-                                )
-                            ) {
-
-                                changesHtml += `
-
-                                    <div>
-                                        Звание:
-                                        <span class="old-value">
-                                            ${escapeHtml(
-                                                changes.rank.old || "—"
-                                            )}
-                                        </span>
-
-                                        →
-
-                                        <strong>
-                                            ${escapeHtml(
-                                                changes.rank.new || "—"
-                                            )}
-                                        </strong>
-                                    </div>
-
-                                `;
-                            }
-
-
-                            if (
-                                changes.unit &&
-                                (
-                                    changes.unit.old !==
-                                    changes.unit.new
-                                )
-                            ) {
-
-                                changesHtml += `
-
-                                    <div>
-                                        Подразделение:
-                                        <span class="old-value">
-                                            ${escapeHtml(
-                                                changes.unit.old || "—"
-                                            )}
-                                        </span>
-
-                                        →
-
-                                        <strong>
-                                            ${escapeHtml(
-                                                changes.unit.new || "—"
-                                            )}
-                                        </strong>
-                                    </div>
-
-                                `;
-                            }
-
-
-                            if (
-                                changes.status &&
-                                (
-                                    changes.status.old !==
-                                    changes.status.new
-                                )
-                            ) {
-
-                                changesHtml += `
-
-                                    <div>
-                                        Статус:
-                                        <span class="old-value">
-                                            ${escapeHtml(
-                                                changes.status.old || "—"
-                                            )}
-                                        </span>
-
-                                        →
-
-                                        <strong>
-                                            ${escapeHtml(
-                                                changes.status.new || "—"
-                                            )}
-                                        </strong>
-                                    </div>
-
-                                `;
-                            }
-
-
-                            return `
-
-                                <div class="ingest-item">
-
-                                    <strong>
-                                        ${escapeHtml(
-                                            item.name
-                                        )}
-                                    </strong>
-
-                                    <code>
-                                        ${escapeHtml(
-                                            item.staticId
-                                        )}
-                                    </code>
-
-                                    <div class="ingest-message">
-                                        ${escapeHtml(
-                                            item.message || ""
-                                        )}
-                                    </div>
-
-                                    ${changesHtml}
-
-                                </div>
-
-                            `;
-
-                        }).join("")}
-
-                    </div>
-
-                </div>
-
-            `;
-        }
-
-
-        /* =================================================
-           УВОЛЕНЫ
-        ================================================= */
-
-        const fired =
-            details.filter(
-                item =>
-                    item.processed ===
-                    "fired"
-            );
-
-
-        if (fired.length) {
-
-            html += `
-
-                <div class="ingest-group ingest-group--danger">
-
-                    <h3>🔴 Уволены</h3>
-
-                    <div class="ingest-list">
-
-                        ${fired.map(item => `
-
-                            <div class="ingest-item">
-
-                                <strong>
-                                    ${escapeHtml(
-                                        item.name
-                                    )}
-                                </strong>
-
-                                <code>
-                                    ${escapeHtml(
-                                        item.staticId
-                                    )}
-                                </code>
-
-                                ${
-                                    item.reason
-                                        ? `
-                                            <div>
-                                                Причина:
-                                                ${escapeHtml(
-                                                    item.reason
-                                                )}
-                                            </div>
-                                        `
-                                        : ""
-                                }
-
-                            </div>
-
-                        `).join("")}
-
-                    </div>
-
-                </div>
-
-            `;
-        }
-
-
-        /* =================================================
-           ПЕРЕВЕДЕНЫ ИЗ КМБ
-        ================================================= */
-
-        const transferred =
-            details.filter(
-                item =>
-                    item.processed ===
-                    "transferred_from_kmb"
-            );
-
-
-        if (transferred.length) {
-
-            html += `
-
-                <div class="ingest-group ingest-group--transfer">
-
-                    <h3>🟠 Переведены из КМБ</h3>
-
-                    <div class="ingest-list">
-
-                        ${transferred.map(item => `
-
-                            <div class="ingest-item">
-
-                                <strong>
-                                    ${escapeHtml(
-                                        item.name
-                                    )}
-                                </strong>
-
-                                <code>
-                                    ${escapeHtml(
-                                        item.staticId
-                                    )}
-                                </code>
-
-                                <div>
-                                    ${escapeHtml(
-                                        item.message
-                                    )}
-                                </div>
-
-                            </div>
-
-                        `).join("")}
-
-                    </div>
-
-                </div>
-
-            `;
-        }
-
-
-        /* =================================================
-           ПРОИГНОРИРОВАНЫ
-        ================================================= */
-
-        const ignored =
-            details.filter(
-                item =>
-                    [
-                        "ignored_other_unit",
-                        "ignored_unknown",
-                        "ignored_old",
-                        "ignored_invalid_transfer",
-                        "ignore",
-                        "ignored"
-                    ].includes(
-                        item.processed
-                    )
-            );
-
-
-        if (ignored.length) {
-
-            html += `
-
-                <div class="ingest-group ingest-group--muted">
-
-                    <h3>⚪ Проигнорированы</h3>
-
-                    <div class="ingest-list">
-
-                        ${ignored.map(item => `
-
-                            <div class="ingest-item">
-
-                                <strong>
-                                    ${escapeHtml(
-                                        item.name ||
-                                        "Неизвестный военнослужащий"
-                                    )}
-                                </strong>
-
-                                ${
-                                    item.staticId
-                                        ? `
-                                            <code>
-                                                ${escapeHtml(
-                                                    item.staticId
-                                                )}
-                                            </code>
-                                        `
-                                        : ""
-                                }
-
-                                <div>
-                                    ${escapeHtml(
-                                        item.message ||
-                                        "Событие проигнорировано"
-                                    )}
-                                </div>
-
-                            </div>
-
-                        `).join("")}
-
-                    </div>
-
-                </div>
-
-            `;
-        }
-
-
-        /* =================================================
-           ДУБЛИКАТЫ
-        ================================================= */
-
-        const duplicates =
-            details.filter(
-                item =>
-                    item.processed ===
-                    "duplicate"
-            );
-
-
-        if (
-            duplicates.length
-        ) {
-
-            html += `
-
-                <div class="ingest-group ingest-group--duplicate">
-
-                    <h3>🟣 Дубликаты</h3>
-
-                    <div class="ingest-list">
-
-                        ${duplicates.map(item => `
-
-                            <div class="ingest-item">
-
-                                <strong>
-                                    ${escapeHtml(
-                                        item.name
-                                    )}
-                                </strong>
-
-                                <code>
-                                    ${escapeHtml(
-                                        item.staticId
-                                    )}
-                                </code>
-
-                                <div>
-                                    Это событие уже было обработано ранее.
-                                </div>
-
-                            </div>
-
-                        `).join("")}
-
-                    </div>
-
-                </div>
-
-            `;
-        }
-
-
-        /* =================================================
-           НЕРАСПОЗНАННЫЕ
-        ================================================= */
-
-        if (
-            Array.isArray(data.bad) &&
-            data.bad.length
-        ) {
-
-            html += `
-
-                <div class="ingest-group ingest-group--danger">
-
-                    <h3>❌ Нераспознанные события</h3>
-
-                    <div class="ingest-list">
-
-                        ${data.bad
-                            .slice(0, 20)
-                            .map(
-                                item => `
-
-                                    <div class="ingest-item">
-
-                                        ${escapeHtml(
-                                            item
-                                        )}
-
-                                    </div>
-
-                                `
-                            )
-                            .join("")}
-
-                    </div>
-
-                </div>
-
-            `;
-        }
-
-
-        /*
-         * Если вообще никаких подробностей нет.
-         */
-
-        if (
-            !details.length &&
-            !(
-                Array.isArray(data.bad) &&
-                data.bad.length
-            )
-        ) {
-
-            html += `
-
-                <div class="ingest-empty">
-
-                    Событий для изменения данных не найдено.
-
-                </div>
-
-            `;
-        }
-
-
-        result.className =
-            "result success";
-
-        result.innerHTML =
-            html;
-
+        result.className = "result success";
+        result.innerHTML = html;
 
         await load();
-
     } catch (error) {
-
-        result.className =
-            "result error";
-
-        result.textContent =
-            error.message;
+        result.className = "result error";
+        result.textContent = error.message;
     }
 }
-
 
 /* =========================
    SEED
 ========================= */
-
 async function seed() {
-
-    const text =
-        document.getElementById("seedInput")
-            .value
-            .trim();
-
-    const result =
-        document.getElementById("seedResult");
-
+    const text = $("seedInput").value.trim();
+    const result = $("seedResult");
 
     if (!text) {
-
-        result.className =
-            "result error";
-
-        result.textContent =
-            "Введите список военнослужащих.";
-
+        result.className = "result error";
+        result.textContent = "Введите список военнослужащих.";
         result.classList.remove("hidden");
-
         return;
     }
 
-
     try {
+        const data = await api("seed", { text });
 
-        const data =
-            await api("seed", {
-                text
-            });
-
-
-        result.className =
-            "result success";
-
+        result.className = "result success";
         result.textContent =
-            `Импортировано: ${data.added ?? 0}.`;
-
+            `Импортировано: ${data.added ?? 0}.` +
+            (data.skipped ? ` Уже были в таблице (не изменены): ${data.skipped}.` : "");
+        result.classList.remove("hidden");
 
         await load();
-
-
     } catch (error) {
-
-        result.className =
-            "result error";
-
-        result.textContent =
-            error.message;
-
+        result.className = "result error";
+        result.textContent = error.message;
         result.classList.remove("hidden");
     }
 }
-
 
 /* =========================
    DIGEST
 ========================= */
-
 async function sendDigest() {
-
     try {
-
-        const data =
-            await api("digest");
-
-        alert(
-            data.message ||
-            "Сводка отправлена."
-        );
-
+        const data = await api("digest");
+        alert(data.message || "Сводка отправлена.");
     } catch (error) {
-
-        alert(
-            "Ошибка отправки:\n\n" +
-            error.message
-        );
+        alert("Ошибка отправки:\n\n" + error.message);
     }
 }
 
-
 /* =========================
-   EDIT
+   MODALS
 ========================= */
+let modalStaticId = null;
 
-async function editPerson(staticId) {
+function openModal(id) {
+    $(id).classList.remove("hidden");
+    document.body.classList.add("modal-open");
+}
 
-    const person =
-        people.find(
-            p => p.staticId === staticId
-        );
+function closeModals() {
+    $("editModal").classList.add("hidden");
+    $("removeModal").classList.add("hidden");
+    document.body.classList.remove("modal-open");
+    modalStaticId = null;
+}
 
-    if (!person) {
-        return;
-    }
+function findPerson(staticId) {
+    return people.find(p => p.staticId === staticId);
+}
 
+/* ----- EDIT ----- */
+function openEditModal(staticId) {
+    const person = findPerson(staticId);
+    if (!person) return;
 
-    const enlisted =
-        prompt(
-            "Дата зачисления на КМБ:\nДД.ММ.ГГГГ ЧЧ:ММ",
-            formatDateTime(person.enlisted)
-        );
+    modalStaticId = staticId;
 
+    $("editModalSubtitle").textContent = `${person.name} • ${person.staticId} • ${person.unit || "—"}`;
+    $("editEnlisted").value = toInputValue(person.enlisted);
+    $("editNote").value = person.note || "";
+    $("editModalError").textContent = "";
 
-    if (enlisted === null) {
-        return;
-    }
+    const noUnit = isNoUnitStatus(person);
+    $("editNoUnitGroup").classList.toggle("hidden", !noUnit);
+    $("editNoUnit").value = noUnit ? toInputValue(person.noUnitSince || person.statusSince) : "";
 
+    openModal("editModal");
+    $("editEnlisted").focus();
+}
 
-    let noUnitStart = "";
+async function submitEdit() {
+    const staticId = modalStaticId;
+    const person = findPerson(staticId);
+    if (!person) return;
 
-    if (
-        person.status ===
-        "Без подразделения"
-    ) {
+    const btn = $("editSaveBtn");
+    const error = $("editModalError");
+    error.textContent = "";
 
-        noUnitStart =
-            prompt(
-                "Дата начала срока без подразделения:\nДД.ММ.ГГГГ ЧЧ:ММ",
-                formatDateTime(person.statusSince)
-            );
-
-        if (noUnitStart === null) {
-            return;
-        }
-    }
-
+    btn.disabled = true;
+    btn.textContent = "Сохранение...";
 
     try {
-
         await api("update", {
-
             type: "setDates",
-
             staticId,
-
-            enlisted,
-
-            noUnitStart
+            enlisted: fromInputValue($("editEnlisted").value),
+            noUnitSince: isNoUnitStatus(person) ? fromInputValue($("editNoUnit").value) : "",
+            note: $("editNote").value
         });
 
-
+        closeModals();
         await load();
-
-
-    } catch (error) {
-
-        alert(
-            "Ошибка изменения:\n\n" +
-            error.message
-        );
+    } catch (err) {
+        error.textContent = "Ошибка изменения: " + err.message;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "Сохранить";
     }
 }
 
+/* ----- REMOVE ----- */
+function openRemoveModal(staticId) {
+    const person = findPerson(staticId);
+    if (!person) return;
 
-/* =========================
-   REMOVE
-========================= */
+    modalStaticId = staticId;
 
-async function removePerson(staticId) {
+    $("removeModalText").textContent =
+        `Удалить ${person.name} (${person.staticId}) из учёта КМБ? Запись будет удалена из таблицы.`;
+    $("removeModalError").textContent = "";
 
-    const person =
-        people.find(
-            p => p.staticId === staticId
-        );
+    openModal("removeModal");
+}
 
-    if (!person) {
-        return;
-    }
+async function submitRemove() {
+    const staticId = modalStaticId;
+    if (!staticId) return;
 
+    const btn = $("removeConfirmBtn");
+    const error = $("removeModalError");
+    error.textContent = "";
 
-    const confirmed =
-        confirm(
-            `Удалить ${person.name} (${staticId}) из учёта КМБ?`
-        );
-
-
-    if (!confirmed) {
-        return;
-    }
-
+    btn.disabled = true;
+    btn.textContent = "Удаление...";
 
     try {
-
-        await api("update", {
-
-            type: "remove",
-
-            staticId
-        });
-
-
+        await api("update", { type: "remove", staticId });
+        closeModals();
         await load();
-
-
-    } catch (error) {
-
-        alert(
-            "Ошибка удаления:\n\n" +
-            error.message
-        );
+    } catch (err) {
+        error.textContent = "Ошибка удаления: " + err.message;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "Удалить";
     }
 }
-
 
 /* =========================
    EVENTS
 ========================= */
+document.addEventListener("DOMContentLoaded", () => {
 
-document.addEventListener(
-    "DOMContentLoaded",
-    () => {
+    const now = new Date();
+    $("todayInput").value = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 
-        const today =
-            document.getElementById("todayInput");
+    $("loginBtn").addEventListener("click", login);
+    $("passwordInput").addEventListener("keydown", e => { if (e.key === "Enter") login(); });
+    $("logoutBtn").addEventListener("click", logout);
+    $("digestBtn").addEventListener("click", sendDigest);
+    $("ingestBtn").addEventListener("click", ingest);
+    $("seedBtn").addEventListener("click", seed);
 
-        const now =
-            new Date();
+    document.querySelectorAll(".tab").forEach(tab => {
+        tab.addEventListener("click", () => {
+            document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
+            tab.classList.add("active");
+            currentFilter = tab.dataset.filter;
+            render();
+        });
+    });
 
-        const yyyy =
-            now.getFullYear();
+    $("unitFilter").addEventListener("change", e => {
+        unitFilter = e.target.value;
+        render();
+    });
 
-        const mm =
-            String(
-                now.getMonth() + 1
-            ).padStart(2, "0");
+    $("sortSelect").addEventListener("change", e => {
+        sortMode = e.target.value;
+        render();
+    });
 
-        const dd =
-            String(
-                now.getDate()
-            ).padStart(2, "0");
+    $("peopleBody").addEventListener("click", event => {
+        const button = event.target.closest("button[data-action]");
+        if (!button) return;
 
-        today.value =
-            `${yyyy}-${mm}-${dd}`;
+        const staticId = button.dataset.static;
+        if (button.dataset.action === "edit") openEditModal(staticId);
+        if (button.dataset.action === "remove") openRemoveModal(staticId);
+    });
 
+    // Модальные окна
+    document.querySelectorAll(".modal [data-close]").forEach(el => el.addEventListener("click", closeModals));
+    document.addEventListener("keydown", e => { if (e.key === "Escape") closeModals(); });
+    $("editSaveBtn").addEventListener("click", submitEdit);
+    $("removeConfirmBtn").addEventListener("click", submitRemove);
 
-        document
-            .getElementById("loginBtn")
-            .addEventListener(
-                "click",
-                login
-            );
-
-
-        document
-            .getElementById("passwordInput")
-            .addEventListener(
-                "keydown",
-                event => {
-
-                    if (
-                        event.key === "Enter"
-                    ) {
-                        login();
-                    }
-
-                }
-            );
-
-
-        document
-            .getElementById("logoutBtn")
-            .addEventListener(
-                "click",
-                logout
-            );
-
-
-        document
-            .getElementById("digestBtn")
-            .addEventListener(
-                "click",
-                sendDigest
-            );
-
-
-        document
-            .getElementById("ingestBtn")
-            .addEventListener(
-                "click",
-                ingest
-            );
-
-
-        document
-            .getElementById("seedBtn")
-            .addEventListener(
-                "click",
-                seed
-            );
-
-
-        document
-            .querySelectorAll(".tab")
-            .forEach(tab => {
-
-                tab.addEventListener(
-                    "click",
-                    () => {
-
-                        document
-                            .querySelectorAll(".tab")
-                            .forEach(
-                                x =>
-                                    x.classList.remove(
-                                        "active"
-                                    )
-                            );
-
-                        tab.classList.add("active");
-
-                        currentFilter =
-                            tab.dataset.filter;
-
-                        render();
-                    }
-                );
-
+    if (password) {
+        api("list")
+            .then(data => {
+                people = Array.isArray(data.people) ? data.people : [];
+                $("loginPanel").classList.add("hidden");
+                $("mainPanel").classList.remove("hidden");
+                render();
+            })
+            .catch(() => {
+                password = "";
+                localStorage.removeItem("kmb_pw");
             });
-
-
-        document
-            .getElementById("peopleBody")
-            .addEventListener(
-                "click",
-                event => {
-
-                    const button =
-                        event.target.closest(
-                            "button[data-action]"
-                        );
-
-                    if (!button) {
-                        return;
-                    }
-
-                    const action =
-                        button.dataset.action;
-
-                    const staticId =
-                        button.dataset.static;
-
-
-                    if (action === "edit") {
-                        editPerson(staticId);
-                    }
-
-                    if (action === "remove") {
-                        removePerson(staticId);
-                    }
-
-                }
-            );
-
-
-        if (password) {
-
-            api("list")
-                .then(data => {
-
-                    people =
-                        Array.isArray(data.people)
-                            ? data.people
-                            : [];
-
-                    document
-                        .getElementById("loginPanel")
-                        .classList.add("hidden");
-
-                    document
-                        .getElementById("mainPanel")
-                        .classList.remove("hidden");
-
-                    render();
-
-                })
-                .catch(() => {
-
-                    password = "";
-
-                    localStorage.removeItem(
-                        "kmb_pw"
-                    );
-                });
-        }
-
-
-        setInterval(
-            () => {
-
-                if (
-                    !document
-                        .getElementById("mainPanel")
-                        .classList.contains("hidden")
-                ) {
-                    render();
-                }
-
-            },
-            60 * 1000
-        );
-
-
-        setInterval(
-          () => {
-            if (
-              !document.getElementById("mainPanel").classList.contains("hidden")
-            ) {
-              silentLoad();
-            }
-          },
-          5 * 60 * 1000,
-        );
-
     }
-);
+
+    setInterval(() => {
+        if (!$("mainPanel").classList.contains("hidden")) render();
+    }, 60 * 1000);
+
+    setInterval(() => {
+        if (!$("mainPanel").classList.contains("hidden")) silentLoad();
+    }, 5 * 60 * 1000);
+});
+
 /* =========================================================
    ОТЧЁТЫ
 ========================================================= */
+const reportResult = $("reportResult");
+const reportResultTitle = $("reportResultTitle");
+const reportText = $("reportText");
+const copyReportButton = $("copyReportButton");
+const reportCopyStatus = $("reportCopyStatus");
 
-const generateNotificationReport =
-    document.getElementById(
-        "generateNotificationReport"
-    );
-
-
-const generateSeniorReport =
-    document.getElementById(
-        "generateSeniorReport"
-    );
-
-
-const reportResult =
-    document.getElementById(
-        "reportResult"
-    );
-
-
-const reportResultTitle =
-    document.getElementById(
-        "reportResultTitle"
-    );
-
-
-const reportText =
-    document.getElementById(
-        "reportText"
-    );
-
-
-const copyReportButton =
-    document.getElementById(
-        "copyReportButton"
-    );
-
-
-const reportCopyStatus =
-    document.getElementById(
-        "reportCopyStatus"
-    );
-
-
-async function loadReports() {
-
-    const result =
-        await api(
-            "reports"
-        );
-
-
-    return result;
-}
-
-
-/**
- * Показывает отчёт.
- */
-function showReport(
-    title,
-    text
-) {
-
-    reportResultTitle.textContent =
-        title;
-
-
-    reportText.value =
-        text || "";
-
-
-    reportResult.hidden =
-        false;
-
-
-    reportCopyStatus.textContent =
-        "";
-
-
-    /*
-     * Прокручиваем страницу
-     * к отчёту.
-     */
-    reportResult.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest"
-    });
-
-
-    /*
-     * Автоматически выделяем текст.
-     */
+function showReport(title, text) {
+    reportResultTitle.textContent = title;
+    reportText.value = text || "";
+    reportResult.hidden = false;
+    reportCopyStatus.textContent = "";
+    reportResult.scrollIntoView({ behavior: "smooth", block: "nearest" });
     reportText.focus();
     reportText.select();
 }
 
+function bindReportButton(buttonId, label, title, key) {
+    const button = $(buttonId);
+    if (!button) return;
 
-/**
- * Отчёт оповещения.
- */
-if (
-    generateNotificationReport
-) {
-
-    generateNotificationReport
-        .addEventListener(
-            "click",
-            async () => {
-
-                try {
-
-                    generateNotificationReport.disabled =
-                        true;
-
-
-                    generateNotificationReport.textContent =
-                        "⏳ Формирование...";
-
-
-                    const reports =
-                        await loadReports();
-
-
-                    showReport(
-                        "📢 Отчёт оповещения",
-                        reports.notification.text
-                    );
-
-                }
-
-                catch (error) {
-
-                    console.error(
-                        error
-                    );
-
-
-                    alert(
-                        "Не удалось сформировать отчёт:\n" +
-                        error.message
-                    );
-
-                }
-
-                finally {
-
-                    generateNotificationReport.disabled =
-                        false;
-
-
-                    generateNotificationReport.textContent =
-                        "📢 Сформировать отчёт оповещения";
-
-                }
-
-            }
-        );
-
+    button.addEventListener("click", async () => {
+        try {
+            button.disabled = true;
+            button.textContent = "⏳ Формирование...";
+            const reports = await api("reports");
+            showReport(title, reports[key].text);
+        } catch (error) {
+            console.error(error);
+            alert("Не удалось сформировать отчёт:\n" + error.message);
+        } finally {
+            button.disabled = false;
+            button.textContent = label;
+        }
+    });
 }
 
+bindReportButton("generateNotificationReport", "📢 Сформировать отчёт оповещения", "📢 Отчёт оповещения", "notification");
+bindReportButton("generateSeniorReport", "📋 Сформировать отчёт старшему составу", "📋 Отчёт старшему составу", "senior");
 
-/**
- * Отчёт старшему составу.
- */
-if (
-    generateSeniorReport
-) {
+if (copyReportButton) {
+    copyReportButton.addEventListener("click", async () => {
+        const text = reportText.value;
+        if (!text) return;
 
-    generateSeniorReport
-        .addEventListener(
-            "click",
-            async () => {
-
-                try {
-
-                    generateSeniorReport.disabled =
-                        true;
-
-
-                    generateSeniorReport.textContent =
-                        "⏳ Формирование...";
-
-
-                    const reports =
-                        await loadReports();
-
-
-                    showReport(
-                        "📋 Отчёт старшему составу",
-                        reports.senior.text
-                    );
-
-                }
-
-                catch (error) {
-
-                    console.error(
-                        error
-                    );
-
-
-                    alert(
-                        "Не удалось сформировать отчёт:\n" +
-                        error.message
-                    );
-
-                }
-
-                finally {
-
-                    generateSeniorReport.disabled =
-                        false;
-
-
-                    generateSeniorReport.textContent =
-                        "📋 Сформировать отчёт старшему составу";
-
-                }
-
-            }
-        );
-
-}
-
-
-/**
- * Копирование отчёта.
- */
-if (
-    copyReportButton
-) {
-
-    copyReportButton
-        .addEventListener(
-            "click",
-            async () => {
-
-                const text =
-                    reportText.value;
-
-
-                if (!text) {
-                    return;
-                }
-
-
-                try {
-
-                    await navigator
-                        .clipboard
-                        .writeText(
-                            text
-                        );
-
-
-                    reportCopyStatus.textContent =
-                        "✓ Отчёт скопирован в буфер обмена.";
-
-
-                }
-
-                catch (error) {
-
-                    /*
-                     * Резервный способ
-                     * для старых браузеров.
-                     */
-                    reportText.focus();
-                    reportText.select();
-
-
-                    document.execCommand(
-                        "copy"
-                    );
-
-
-                    reportCopyStatus.textContent =
-                        "✓ Отчёт скопирован.";
-
-                }
-
-            }
-        );
-
+        try {
+            await navigator.clipboard.writeText(text);
+            reportCopyStatus.textContent = "✓ Отчёт скопирован в буфер обмена.";
+        } catch (error) {
+            reportText.focus();
+            reportText.select();
+            document.execCommand("copy");
+            reportCopyStatus.textContent = "✓ Отчёт скопирован.";
+        }
+    });
 }

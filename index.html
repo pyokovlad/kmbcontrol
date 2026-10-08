@@ -3,163 +3,113 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
     <title>Контроль КМБ</title>
-
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet">
-
     <link rel="stylesheet" href="kmb.css">
 </head>
-
 <body>
-
 <div class="app">
 
     <header class="header">
         <div class="header__left">
             <div class="header__logo">КМБ</div>
-
             <div>
                 <h1>Контроль сроков КМБ</h1>
                 <p>Учебный батальон • В/Ч №12132</p>
             </div>
         </div>
-
         <div class="header__actions">
-            <button id="digestBtn" class="btn btn--secondary">
-                Сводка в Telegram
-            </button>
-
-            <button id="logoutBtn" class="btn btn--danger">
-                Выйти
-            </button>
+            <button id="digestBtn" class="btn btn--secondary">Сводка в Telegram</button>
+            <button id="logoutBtn" class="btn btn--danger">Выйти</button>
         </div>
     </header>
 
-
     <!-- LOGIN -->
-
     <section id="loginPanel" class="login">
         <div class="login__box">
-
             <div class="login__icon">🔐</div>
-
             <h2>Доступ к учёту КМБ</h2>
-
-            <p>
-                Введите пароль для доступа к системе.
-            </p>
-
+            <p>Введите пароль для доступа к системе.</p>
             <div class="form-group">
                 <label for="passwordInput">Пароль</label>
-
-                <input
-                    id="passwordInput"
-                    type="password"
-                    placeholder="Введите пароль"
-                    autocomplete="current-password"
-                >
+                <input id="passwordInput" type="password" placeholder="Введите пароль" autocomplete="current-password">
             </div>
-
-            <button id="loginBtn" class="btn btn--primary btn--full">
-                Войти
-            </button>
-
+            <button id="loginBtn" class="btn btn--primary btn--full">Войти</button>
             <div id="loginError" class="form-error"></div>
-
         </div>
     </section>
 
-
     <!-- MAIN -->
-
     <main id="mainPanel" class="main hidden">
 
-        <!-- STATISTICS -->
-
         <section class="stats">
-
             <div class="stat-card stat-card--danger">
                 <span class="stat-card__label">Срок вышел</span>
                 <strong id="lateCount">0</strong>
             </div>
-
             <div class="stat-card stat-card--warning">
                 <span class="stat-card__label">Меньше 24 часов</span>
                 <strong id="soonCount">0</strong>
             </div>
-
             <div class="stat-card stat-card--success">
                 <span class="stat-card__label">В срок</span>
                 <strong id="okCount">0</strong>
             </div>
-
             <div class="stat-card">
                 <span class="stat-card__label">Всего на контроле</span>
                 <strong id="totalCount">0</strong>
             </div>
-
         </section>
-
-
-        <!-- TABS -->
 
         <section class="panel">
 
             <div class="tabs">
-
-                <button class="tab active" data-filter="urgent">
-                    Срочные
-                    <span id="tabUrgentCount">0</span>
-                </button>
-
-                <button class="tab" data-filter="kmb">
-                    КМБ
-                    <span id="tabKmbCount">0</span>
-                </button>
-
-                <button class="tab" data-filter="nounit">
-                    Без подразделения
-                    <span id="tabNoUnitCount">0</span>
-                </button>
-
-                <button class="tab" data-filter="all">
-                    Все
-                    <span id="tabAllCount">0</span>
-                </button>
-
+                <button class="tab active" data-filter="urgent">Срочные <span id="tabUrgentCount">0</span></button>
+                <button class="tab" data-filter="kmb">КМБ / УКМБ <span id="tabKmbCount">0</span></button>
+                <button class="tab" data-filter="nounit">Без подразделения <span id="tabNoUnitCount">0</span></button>
+                <button class="tab" data-filter="all">Все <span id="tabAllCount">0</span></button>
             </div>
 
-
-            <!-- TABLE -->
+            <div class="toolbar">
+                <div class="toolbar__item">
+                    <label for="unitFilter">Подразделение</label>
+                    <select id="unitFilter">
+                        <option value="all">Все подразделения</option>
+                        <option value="Учебная рота">Учебная рота</option>
+                        <option value="Военная Академия">Военная Академия</option>
+                        <option value="Временно Без Подразделения">Временно Без Подразделения</option>
+                    </select>
+                </div>
+                <div class="toolbar__item">
+                    <label for="sortSelect">Сортировка по дедлайну</label>
+                    <select id="sortSelect">
+                        <option value="least">Меньше времени → больше времени</option>
+                        <option value="most">Больше времени → меньше времени</option>
+                    </select>
+                </div>
+            </div>
 
             <div class="table-wrap">
-
                 <table class="people-table">
-
                     <thead>
-                    <tr>
-                        <th>Военнослужащий</th>
-                        <th>Статик</th>
-                        <th>Звание</th>
-                        <th>Подразделение</th>
-                        <th>Составитель</th>
-                        <th>Статус</th>
-                        <th>Зачислен</th>
-                        <th>Дедлайн</th>
-                        <th>Осталось</th>
-                        <th>Действия</th>
-                    </tr>
+                        <tr>
+                            <th>Военнослужащий</th>
+                            <th>Статик</th>
+                            <th>Звание</th>
+                            <th>Подразделение</th>
+                            <th>Составитель</th>
+                            <th>Статус</th>
+                            <th>Зачислен на КМБ</th>
+                            <th>Зачислен в ВБП</th>
+                            <th>Дедлайн</th>
+                            <th>Осталось</th>
+                            <th>Действия</th>
+                        </tr>
                     </thead>
-
-                    <tbody id="peopleBody">
-                    </tbody>
-
+                    <tbody id="peopleBody"></tbody>
                 </table>
-
             </div>
 
             <div id="emptyState" class="empty hidden">
@@ -167,241 +117,155 @@
                 <h3>Нет записей</h3>
                 <p>В выбранной категории военнослужащих нет.</p>
             </div>
-
         </section>
 
-
         <!-- INGEST -->
-
         <section class="panel">
-
             <div class="panel__header">
                 <div>
                     <h2>Загрузка журнала аудита</h2>
-
-                    <p>
-                        Вставьте сюда сообщения аудита.
-                        Система сама найдёт нужные события.
-                    </p>
+                    <p>Вставьте сюда сообщения аудита. Система сама найдёт нужные события.</p>
                 </div>
             </div>
 
-
             <div class="notice notice--info">
-
                 <strong>Учитываются:</strong>
-
                 <ul>
                     <li>Учебная рота</li>
                     <li>Военная Академия</li>
                     <li>Временно Без Подразделения</li>
                 </ul>
-
-                <p>
-                    События по другим подразделениям игнорируются.
-                </p>
-
+                <p>События по другим подразделениям игнорируются.</p>
+                <p>«Сегодня» в аудите = дата, выбранная ниже; «Вчера» = день до неё.</p>
             </div>
-
 
             <div class="form-group">
-
-                <label for="logInput">
-                    Сообщения журнала аудита
-                </label>
-
-                <textarea
-                    id="logInput"
-                    rows="16"
-                    placeholder="Вставьте сюда сообщения из журнала аудита..."
-                ></textarea>
-
+                <label for="logInput">Сообщения журнала аудита</label>
+                <textarea id="logInput" rows="16" placeholder="Вставьте сюда сообщения из журнала аудита..."></textarea>
             </div>
-
 
             <div class="form-row">
-
                 <div class="form-group">
-
-                    <label for="todayInput">
-                        Какая дата означает «Сегодня»
-                    </label>
-
-                    <input
-                        id="todayInput"
-                        type="date"
-                    >
-
+                    <label for="todayInput">Какая дата означает «Сегодня»</label>
+                    <input id="todayInput" type="date">
                 </div>
-
                 <div class="form-group form-group--button">
-
-                    <button
-                        id="ingestBtn"
-                        class="btn btn--primary"
-                    >
-                        Обработать журнал
-                    </button>
-
+                    <button id="ingestBtn" class="btn btn--primary">Обработать журнал</button>
                 </div>
-
             </div>
-
 
             <div id="ingestResult" class="result hidden"></div>
-
         </section>
 
+        <!-- REPORTS -->
         <section class="reports-panel">
+            <div class="reports-panel__header">
+                <div>
+                    <h2 class="reports-panel__title">Отчёты</h2>
+                    <p class="reports-panel__description">Сформируйте готовый текст для копирования.</p>
+                </div>
+            </div>
 
-    <div class="reports-panel__header">
+            <div class="reports-panel__buttons">
+                <button type="button" class="report-button report-button--warning" id="generateNotificationReport">📢 Сформировать отчёт оповещения</button>
+                <button type="button" class="report-button report-button--senior" id="generateSeniorReport">📋 Сформировать отчёт старшему составу</button>
+            </div>
 
-        <div>
-            <h2 class="reports-panel__title">
-                Отчёты
-            </h2>
+            <div class="report-result" id="reportResult" hidden>
+                <div class="report-result__header">
+                    <h3 id="reportResultTitle">Готовый отчёт</h3>
+                    <button type="button" class="report-copy" id="copyReportButton">📋 Копировать</button>
+                </div>
+                <textarea id="reportText" class="report-text" readonly spellcheck="false"></textarea>
+                <div class="report-result__status" id="reportCopyStatus"></div>
+            </div>
+        </section>
 
-            <p class="reports-panel__description">
-                Сформируйте готовый текст для копирования.
-            </p>
-        </div>
-
-    </div>
-
-
-    <div class="reports-panel__buttons">
-
-        <button
-            type="button"
-            class="report-button report-button--warning"
-            id="generateNotificationReport"
-        >
-            📢 Сформировать отчёт оповещения
-        </button>
-
-
-        <button
-            type="button"
-            class="report-button report-button--senior"
-            id="generateSeniorReport"
-        >
-            📋 Сформировать отчёт старшему составу
-        </button>
-
-    </div>
-
-
-    <div
-        class="report-result"
-        id="reportResult"
-        hidden
-    >
-
-        <div class="report-result__header">
-
-            <h3 id="reportResultTitle">
-                Готовый отчёт
-            </h3>
-
-
-            <button
-                type="button"
-                class="report-copy"
-                id="copyReportButton"
-            >
-                📋 Копировать
-            </button>
-
-        </div>
-
-
-        <textarea
-            id="reportText"
-            class="report-text"
-            readonly
-            spellcheck="false"
-        ></textarea>
-
-
-        <div
-            class="report-result__status"
-            id="reportCopyStatus"
-        ></div>
-
-    </div>
-
-</section>
         <!-- SEED -->
-
         <section class="panel">
-
             <div class="panel__header">
-
                 <div>
                     <h2>Первоначальное заполнение</h2>
-
-                    <p>
-                        Используйте только для первичного переноса уже
-                        существующего состава.
-                    </p>
+                    <p>Используйте только для первичного переноса. Уже существующие военнослужащие не перезаписываются.</p>
                 </div>
-
             </div>
-
 
             <div class="notice">
-
-                <p>
-                    Формат одной строки:
-                </p>
-
-                <code>
-                    Ник | 123-456 | Рядовой | Учебная рота | 27.09.2026 19:58
-                </code>
-
-                <p>
-                    Для военнослужащего без подразделения:
-                </p>
-
-                <code>
-                    Ник | 123-456 | Младший сержант | Временно Без Подразделения | 27.09.2026 19:58
-                </code>
-
+                <p>Формат одной строки:</p>
+                <code>Ник | 123-456 | Рядовой | Учебная рота | 27.09.2026 19:58</code>
+                <p>Для военнослужащего без подразделения:</p>
+                <code>Ник | 123-456 | Младший сержант | Временно Без Подразделения | 27.09.2026 19:58</code>
             </div>
-
 
             <div class="form-group">
-
-                <label for="seedInput">
-                    Список военнослужащих
-                </label>
-
-                <textarea
-                    id="seedInput"
-                    rows="8"
-                    placeholder="Каждый военнослужащий с новой строки..."
-                ></textarea>
-
+                <label for="seedInput">Список военнослужащих</label>
+                <textarea id="seedInput" rows="8" placeholder="Каждый военнослужащий с новой строки..."></textarea>
             </div>
 
-
-            <button
-                id="seedBtn"
-                class="btn btn--secondary"
-            >
-                Импортировать состав
-            </button>
-
+            <button id="seedBtn" class="btn btn--secondary">Импортировать состав</button>
             <div id="seedResult" class="result hidden"></div>
-
         </section>
-
     </main>
-
 </div>
 
+<!-- MODAL: EDIT -->
+<div id="editModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="editModalTitle">
+    <div class="modal__backdrop" data-close></div>
+    <div class="modal__box">
+        <div class="modal__header">
+            <div>
+                <h3 id="editModalTitle">Изменить данные</h3>
+                <p id="editModalSubtitle"></p>
+            </div>
+            <button type="button" class="modal__x" data-close aria-label="Закрыть">✕</button>
+        </div>
+
+        <div class="form-group">
+            <label for="editEnlisted">Дата зачисления на КМБ</label>
+            <input id="editEnlisted" type="datetime-local">
+        </div>
+
+        <div class="form-group" id="editNoUnitGroup">
+            <label for="editNoUnit">Дата зачисления в ВБП</label>
+            <input id="editNoUnit" type="datetime-local">
+        </div>
+
+        <div class="form-group">
+            <label for="editNote">Заметка</label>
+            <textarea id="editNote" rows="3" placeholder="Необязательно"></textarea>
+        </div>
+
+        <div id="editModalError" class="form-error"></div>
+
+        <div class="modal__footer">
+            <button type="button" class="btn btn--secondary" data-close>Отмена</button>
+            <button type="button" class="btn btn--primary" id="editSaveBtn">Сохранить</button>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL: REMOVE -->
+<div id="removeModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="removeModalTitle">
+    <div class="modal__backdrop" data-close></div>
+    <div class="modal__box modal__box--small">
+        <div class="modal__header">
+            <div>
+                <h3 id="removeModalTitle">Удалить из учёта?</h3>
+            </div>
+            <button type="button" class="modal__x" data-close aria-label="Закрыть">✕</button>
+        </div>
+
+        <p class="modal__text" id="removeModalText"></p>
+
+        <div id="removeModalError" class="form-error"></div>
+
+        <div class="modal__footer">
+            <button type="button" class="btn btn--secondary" data-close>Отмена</button>
+            <button type="button" class="btn btn--danger" id="removeConfirmBtn">Удалить</button>
+        </div>
+    </div>
+</div>
 
 <script src="kmb.js"></script>
-
 </body>
 </html>
